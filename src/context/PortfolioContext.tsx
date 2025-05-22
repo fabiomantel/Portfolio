@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Asset, Purchase, RSU, ESPP, Currency, SyncMode } from '../types';
-import { mockAssets } from '../data/mockAssets';
-import { mockRSUs, mockESPPs } from '../data/mockEquity';
+import { supabase } from '../lib/supabase';
 import { convertCurrency } from '../utils/currencyUtils';
 import { fetchLatestPrices } from '../utils/dataFetching';
 
@@ -13,12 +12,16 @@ interface PortfolioContextType {
   syncMode: SyncMode;
   isLoading: boolean;
   totalValue: number;
-  addAsset: (asset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => void;
-  updateAsset: (id: string, asset: Partial<Asset>) => void;
-  deleteAsset: (id: string) => void;
-  addPurchase: (assetId: string, purchase: Omit<Purchase, 'id'>) => void;
-  addRSU: (rsu: Omit<RSU, 'id'>) => void;
-  addESPP: (espp: Omit<ESPP, 'id'>) => void;
+  addAsset: (asset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => Promise<void>;
+  updateAsset: (id: string, asset: Partial<Asset>) => Promise<void>;
+  deleteAsset: (id: string) => Promise<void>;
+  addPurchase: (assetId: string, purchase: Omit<Purchase, 'id'>) => Promise<void>;
+  addRSU: (rsu: Omit<RSU, 'id'>) => Promise<void>;
+  updateRSU: (id: string, rsu: Partial<RSU>) => Promise<void>;
+  deleteRSU: (id: string) => Promise<void>;
+  addESPP: (espp: Omit<ESPP, 'id'>) => Promise<void>;
+  updateESPP: (id: string, espp: Partial<ESPP>) => Promise<void>;
+  deleteESPP: (id: string) => Promise<void>;
   setCurrency: (currency: Currency) => void;
   setSyncMode: (mode: SyncMode) => void;
   refreshPrices: () => Promise<void>;
@@ -27,13 +30,54 @@ interface PortfolioContextType {
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
 export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [assets, setAssets] = useState<Asset[]>(mockAssets);
-  const [rsus, setRSUs] = useState<RSU[]>(mockRSUs);
-  const [espps, setESPPs] = useState<ESPP[]>(mockESPPs);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [rsus, setRSUs] = useState<RSU[]>([]);
+  const [espps, setESPPs] = useState<ESPP[]>([]);
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>(Currency.USD);
-  const [syncMode, setSyncMode] = useState<SyncMode>(SyncMode.LOCAL);
+  const [syncMode, setSyncMode] = useState<SyncMode>(SyncMode.CLOUD);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [totalValue, setTotalValue] = useState<number>(0);
+
+  // Fetch initial data
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const { data: assetsData, error: assetsError } = await supabase
+        .from('assets')
+        .select(`
+          *,
+          purchases (*)
+        `);
+
+      if (assetsError) throw assetsError;
+      setAssets(assetsData || []);
+
+      const { data: rsusData, error: rsusError } = await supabase
+        .from('rsus')
+        .select(`
+          *,
+          vesting_entries (*)
+        `);
+
+      if (rsusError) throw rsusError;
+      setRSUs(rsusData || []);
+
+      const { data: esppsData, error: esppsError } = await supabase
+        .from('espps')
+        .select('*');
+
+      if (esppsError) throw esppsError;
+      setESPPs(esppsData || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Calculate total portfolio value
   useEffect(() => {
@@ -59,6 +103,19 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsLoading(true);
     try {
       const updatedAssets = await fetchLatestPrices(assets);
+      
+      // Update prices in Supabase
+      for (const asset of updatedAssets) {
+        await supabase
+          .from('assets')
+          .update({
+            current_price: asset.currentPrice,
+            previous_price: asset.previousPrice,
+            last_updated: new Date().toISOString()
+          })
+          .eq('id', asset.id);
+      }
+      
       setAssets(updatedAssets);
     } catch (error) {
       console.error("Failed to refresh prices:", error);
@@ -67,67 +124,107 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [assets]);
 
-  const addAsset = useCallback((newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
-    const asset: Asset = {
-      ...newAsset,
-      id: crypto.randomUUID(),
-      currentPrice: 0,
-      previousPrice: 0,
-      lastUpdated: new Date()
-    };
-    
-    setAssets(prev => [...prev, asset]);
-    refreshPrices();
-  }, []);
+  // CRUD operations for assets
+  const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
+    const { data, error } = await supabase
+      .from('assets')
+      .insert([{
+        ...newAsset,
+        current_price: 0,
+        previous_price: 0,
+        last_updated: new Date().toISOString()
+      }])
+      .select()
+      .single();
 
-  const updateAsset = useCallback((id: string, updatedFields: Partial<Asset>) => {
-    setAssets(prev => 
-      prev.map(asset => 
-        asset.id === id ? { ...asset, ...updatedFields } : asset
-      )
-    );
-  }, []);
+    if (error) throw error;
+    setAssets(prev => [...prev, data]);
+    await refreshPrices();
+  };
 
-  const deleteAsset = useCallback((id: string) => {
+  const updateAsset = async (id: string, updatedFields: Partial<Asset>) => {
+    const { error } = await supabase
+      .from('assets')
+      .update(updatedFields)
+      .eq('id', id);
+
+    if (error) throw error;
+    setAssets(prev => prev.map(asset => asset.id === id ? { ...asset, ...updatedFields } : asset));
+  };
+
+  const deleteAsset = async (id: string) => {
+    const { error } = await supabase
+      .from('assets')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
     setAssets(prev => prev.filter(asset => asset.id !== id));
-  }, []);
+  };
 
-  const addPurchase = useCallback((assetId: string, purchase: Omit<Purchase, 'id'>) => {
-    const newPurchase: Purchase = {
-      ...purchase,
-      id: crypto.randomUUID()
-    };
-    
-    setAssets(prev => 
-      prev.map(asset => 
-        asset.id === assetId 
-          ? { ...asset, purchases: [...asset.purchases, newPurchase] } 
-          : asset
-      )
-    );
-  }, []);
+  // CRUD operations for RSUs
+  const addRSU = async (rsu: Omit<RSU, 'id'>) => {
+    const { data, error } = await supabase
+      .from('rsus')
+      .insert([rsu])
+      .select()
+      .single();
 
-  const addRSU = useCallback((rsu: Omit<RSU, 'id'>) => {
-    const newRSU: RSU = {
-      ...rsu,
-      id: crypto.randomUUID()
-    };
-    
-    setRSUs(prev => [...prev, newRSU]);
-  }, []);
+    if (error) throw error;
+    setRSUs(prev => [...prev, data]);
+  };
 
-  const addESPP = useCallback((espp: Omit<ESPP, 'id'>) => {
-    const newESPP: ESPP = {
-      ...espp,
-      id: crypto.randomUUID()
-    };
-    
-    setESPPs(prev => [...prev, newESPP]);
-  }, []);
+  const updateRSU = async (id: string, updatedFields: Partial<RSU>) => {
+    const { error } = await supabase
+      .from('rsus')
+      .update(updatedFields)
+      .eq('id', id);
 
-  const setCurrency = useCallback((currency: Currency) => {
-    setSelectedCurrency(currency);
-  }, []);
+    if (error) throw error;
+    setRSUs(prev => prev.map(rsu => rsu.id === id ? { ...rsu, ...updatedFields } : rsu));
+  };
+
+  const deleteRSU = async (id: string) => {
+    const { error } = await supabase
+      .from('rsus')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    setRSUs(prev => prev.filter(rsu => rsu.id !== id));
+  };
+
+  // CRUD operations for ESPPs
+  const addESPP = async (espp: Omit<ESPP, 'id'>) => {
+    const { data, error } = await supabase
+      .from('espps')
+      .insert([espp])
+      .select()
+      .single();
+
+    if (error) throw error;
+    setESPPs(prev => [...prev, data]);
+  };
+
+  const updateESPP = async (id: string, updatedFields: Partial<ESPP>) => {
+    const { error } = await supabase
+      .from('espps')
+      .update(updatedFields)
+      .eq('id', id);
+
+    if (error) throw error;
+    setESPPs(prev => prev.map(espp => espp.id === id ? { ...espp, ...updatedFields } : espp));
+  };
+
+  const deleteESPP = async (id: string) => {
+    const { error } = await supabase
+      .from('espps')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    setESPPs(prev => prev.filter(espp => espp.id !== id));
+  };
 
   const value = {
     assets,
@@ -142,8 +239,12 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     deleteAsset,
     addPurchase,
     addRSU,
+    updateRSU,
+    deleteRSU,
     addESPP,
-    setCurrency,
+    updateESPP,
+    deleteESPP,
+    setCurrency: setSelectedCurrency,
     setSyncMode,
     refreshPrices
   };
