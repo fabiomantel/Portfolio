@@ -50,25 +50,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
         .select(`
-          id,
-          user_id,
-          name,
-          ticker,
-          exchange,
-          trading_currency,
-          broker,
-          current_price,
-          previous_price,
-          last_updated,
-          created_at,
-          purchases (
-            id,
-            price,
-            quantity,
-            date,
-            currency,
-            created_at
-          )
+          *,
+          purchases (*)
         `);
 
       if (assetsError) throw assetsError;
@@ -78,20 +61,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const { data: rsusData, error: rsusError } = await supabase
         .from('rsus')
         .select(`
-          id,
-          user_id,
-          ticker,
-          company_name,
-          grant_date,
-          total_granted,
-          created_at,
-          vesting_entries (
-            id,
-            date,
-            quantity,
-            is_vested,
-            created_at
-          )
+          *,
+          vesting_entries (*)
         `);
 
       if (rsusError) throw rsusError;
