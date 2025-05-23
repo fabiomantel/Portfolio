@@ -46,17 +46,53 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Updated query to use proper relationship syntax
+      // Query assets with their related purchases
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
-        .select('*, purchases(*)');
+        .select(`
+          id,
+          user_id,
+          name,
+          ticker,
+          exchange,
+          trading_currency,
+          broker,
+          current_price,
+          previous_price,
+          last_updated,
+          created_at,
+          purchases (
+            id,
+            price,
+            quantity,
+            date,
+            currency,
+            created_at
+          )
+        `);
 
       if (assetsError) throw assetsError;
       setAssets(assetsData || []);
 
+      // Query RSUs with their related vesting entries
       const { data: rsusData, error: rsusError } = await supabase
         .from('rsus')
-        .select('*, vesting_entries(*)');
+        .select(`
+          id,
+          user_id,
+          ticker,
+          company_name,
+          grant_date,
+          total_granted,
+          created_at,
+          vesting_entries (
+            id,
+            date,
+            quantity,
+            is_vested,
+            created_at
+          )
+        `);
 
       if (rsusError) throw rsusError;
       setRSUs(rsusData || []);
@@ -77,8 +113,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Calculate total portfolio value
   useEffect(() => {
     const total = assets.reduce((sum, asset) => {
-      const assetValue = asset.currentPrice * asset.purchases.reduce((qty, p) => qty + p.quantity, 0);
-      const convertedValue = convertCurrency(assetValue, asset.tradingCurrency, selectedCurrency);
+      const assetValue = asset.current_price * asset.purchases.reduce((qty, p) => qty + p.quantity, 0);
+      const convertedValue = convertCurrency(assetValue, asset.trading_currency, selectedCurrency);
       return sum + convertedValue;
     }, 0);
     
@@ -104,8 +140,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         await supabase
           .from('assets')
           .update({
-            current_price: asset.currentPrice,
-            previous_price: asset.previousPrice,
+            current_price: asset.current_price,
+            previous_price: asset.previous_price,
             last_updated: new Date().toISOString()
           })
           .eq('id', asset.id);
@@ -133,7 +169,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       .single();
 
     if (error) throw error;
-    setAssets(prev => [...prev, data]);
+    setAssets(prev => [...prev, { ...data, purchases: [] }]);
     await refreshPrices();
   };
 
@@ -188,7 +224,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       .single();
 
     if (error) throw error;
-    setRSUs(prev => [...prev, data]);
+    setRSUs(prev => [...prev, { ...data, vesting_entries: [] }]);
   };
 
   const updateRSU = async (id: string, updatedFields: Partial<RSU>) => {
