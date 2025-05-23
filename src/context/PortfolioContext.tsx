@@ -162,6 +162,28 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setAssets(prev => prev.filter(asset => asset.id !== id));
   };
 
+  // Add purchase operation
+  const addPurchase = async (assetId: string, purchase: Omit<Purchase, 'id'>) => {
+    const { data, error } = await supabase
+      .from('purchases')
+      .insert([{ ...purchase, asset_id: assetId }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Update the local assets state to include the new purchase
+    setAssets(prev => prev.map(asset => {
+      if (asset.id === assetId) {
+        return {
+          ...asset,
+          purchases: [...asset.purchases, data]
+        };
+      }
+      return asset;
+    }));
+  };
+
   // CRUD operations for RSUs
   const addRSU = async (rsu: Omit<RSU, 'id'>) => {
     const { data, error } = await supabase
