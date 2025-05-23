@@ -46,10 +46,10 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Modified query to properly handle the relationship
+      // Updated query to use proper relationship syntax
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
-        .select('id, name, ticker, exchange, trading_currency, broker, current_price, previous_price, last_updated, purchases(id, price, quantity, date, currency)');
+        .select('*, purchases(*)');
 
       if (assetsError) throw assetsError;
       setAssets(assetsData || []);
