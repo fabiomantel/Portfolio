@@ -150,10 +150,16 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // CRUD operations for assets
   const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
     try {
-      // First, insert the asset
+      // Get the current user's ID
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!user) throw new Error('No authenticated user found');
+
+      // First, insert the asset with the user's ID
       const { data: assetData, error: assetError } = await supabase
         .from('assets')
         .insert([{
+          user_id: user.id,
           name: newAsset.name,
           ticker: newAsset.ticker,
           exchange: newAsset.exchange,
