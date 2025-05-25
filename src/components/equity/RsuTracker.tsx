@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { usePortfolio } from '../../context/PortfolioContext';
 import { formatCurrency } from '../../utils/currencyUtils';
-import { PlusCircleIcon, XIcon } from 'lucide-react';
+import { PlusCircleIcon, XIcon, PencilIcon, TrashIcon } from 'lucide-react';
 import { RSU, VestingEntry } from '../../types';
 
 interface RsuTrackerProps {
   onAddRsu: () => void;
+  onEditRsu: (rsu: RSU) => void;
 }
 
-const RsuTracker: React.FC<RsuTrackerProps> = ({ onAddRsu }) => {
-  const { rsus } = usePortfolio();
+const RsuTracker: React.FC<RsuTrackerProps> = ({ onAddRsu, onEditRsu }) => {
+  const { rsus, deleteRSU } = usePortfolio();
   const [expandedRsu, setExpandedRsu] = useState<string | null>(null);
   
   const toggleExpand = (id: string) => {
@@ -18,6 +19,10 @@ const RsuTracker: React.FC<RsuTrackerProps> = ({ onAddRsu }) => {
   
   // Calculate vested percentage
   const getVestedPercentage = (rsu: RSU) => {
+    if (!rsu.vestingSchedule || rsu.vestingSchedule.length === 0) {
+      return 0;
+    }
+    
     const vestedShares = rsu.vestingSchedule
       .filter(entry => entry.isVested)
       .reduce((sum, entry) => sum + entry.quantity, 0);
@@ -33,6 +38,16 @@ const RsuTracker: React.FC<RsuTrackerProps> = ({ onAddRsu }) => {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     return upcomingVestings[0];
+  };
+
+  const handleDelete = async (rsu: RSU) => {
+    if (window.confirm('Are you sure you want to delete this RSU grant?')) {
+      try {
+        await deleteRSU(rsu.id);
+      } catch (error) {
+        console.error('Failed to delete RSU:', error);
+      }
+    }
   };
 
   return (
@@ -79,16 +94,30 @@ const RsuTracker: React.FC<RsuTrackerProps> = ({ onAddRsu }) => {
                         {rsu.ticker} • Grant Date: {new Date(rsu.grantDate).toLocaleDateString()}
                       </div>
                     </div>
-                    <button
-                      onClick={() => toggleExpand(rsu.id)}
-                      className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                    >
-                      {isExpanded ? (
-                        <XIcon size={18} />
-                      ) : (
-                        <span className="text-sm font-medium text-teal-600 dark:text-teal-400">Details</span>
-                      )}
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => onEditRsu(rsu)}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        <PencilIcon size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(rsu)}
+                        className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                      <button
+                        onClick={() => toggleExpand(rsu.id)}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        {isExpanded ? (
+                          <XIcon size={18} />
+                        ) : (
+                          <span className="text-sm font-medium text-teal-600 dark:text-teal-400">Details</span>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="mb-4">

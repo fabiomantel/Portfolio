@@ -1,12 +1,12 @@
 import React from 'react';
-import { SunIcon, MoonIcon, CreditCardIcon, CloudIcon, DatabaseIcon, DollarSignIcon, CircleIcon } from 'lucide-react';
+import { SunIcon, MoonIcon, DollarSignIcon, CircleIcon } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { usePortfolio } from '../../context/PortfolioContext';
-import { Currency, SyncMode, ThemeMode } from '../../types';
+import { Currency, ThemeMode } from '../../types';
 
 const Navbar: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const { selectedCurrency, setCurrency, syncMode, setSyncMode, refreshPrices, isLoading } = usePortfolio();
+  const { selectedCurrency, setCurrency, refreshPrices, isLoading } = usePortfolio();
 
   return (
     <nav className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 transition-colors duration-200">
@@ -53,23 +53,12 @@ const Navbar: React.FC = () => {
                 onClick={() => setCurrency(selectedCurrency === Currency.USD ? Currency.ILS : Currency.USD)}
                 className="flex items-center px-3 py-2 rounded-md bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors duration-200"
               >
-                <DollarSignIcon size={16} className="mr-1" />
-                <span>{selectedCurrency}</span>
-              </button>
-            </div>
-
-            {/* Persistence toggle */}
-            <div className="relative inline-flex items-center">
-              <button
-                onClick={() => setSyncMode(syncMode === SyncMode.LOCAL ? SyncMode.CLOUD : SyncMode.LOCAL)}
-                className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 focus:outline-none transition-colors duration-200"
-                aria-label={syncMode === SyncMode.LOCAL ? "Switch to cloud sync" : "Switch to local storage"}
-              >
-                {syncMode === SyncMode.LOCAL ? (
-                  <DatabaseIcon size={20} />
+                {selectedCurrency === Currency.USD ? (
+                  <DollarSignIcon size={16} className="mr-1" />
                 ) : (
-                  <CloudIcon size={20} />
+                  <span className="mr-1">₪</span>
                 )}
+                <span>{selectedCurrency}</span>
               </button>
             </div>
 
@@ -81,9 +70,9 @@ const Navbar: React.FC = () => {
                 aria-label={theme === ThemeMode.DARK ? "Switch to light theme" : "Switch to dark theme"}
               >
                 {theme === ThemeMode.DARK ? (
-                  <SunIcon size={20} />
-                ) : (
                   <MoonIcon size={20} />
+                ) : (
+                  <SunIcon size={20} />
                 )}
               </button>
             </div>

@@ -28,6 +28,9 @@ export interface RSU {
   grantDate: Date;
   totalGranted: number;
   vestingSchedule: VestingEntry[];
+  currentPrice?: number;
+  previousPrice?: number;
+  lastUpdated?: Date;
 }
 
 export interface VestingEntry {
@@ -36,6 +39,11 @@ export interface VestingEntry {
   quantity: number;
   isVested: boolean;
 }
+
+export type VestingEntryWithoutId = Omit<VestingEntry, 'id'>;
+export type RsuFormData = Omit<RSU, 'id' | 'vestingSchedule'> & {
+  vestingSchedule: VestingEntryWithoutId[];
+};
 
 // ESPP Types
 export interface ESPP {
@@ -48,11 +56,25 @@ export interface ESPP {
   quantity: number;
   discount: number;
   broker: string;
-  purchaseCycle: {
-    startDate: Date;
-    endDate: Date;
-  };
+  cycleStartDate: Date;
+  cycleEndDate: Date;
+  currentPrice?: number;
+  previousPrice?: number;
+  lastUpdated?: Date;
 }
+
+export type EsppFormData = {
+  ticker: string;
+  company_name: string;
+  grant_date: Date;
+  purchase_price: number;
+  market_price: number;
+  quantity: number;
+  discount: number;
+  broker: string;
+  cycle_start_date: Date;
+  cycle_end_date: Date;
+};
 
 // Enums
 export enum Exchange {
@@ -60,19 +82,21 @@ export enum Exchange {
   NASDAQ = "NASDAQ",
   TASE = "TASE",
   LSE = "LSE",
-  EURONEXT = "EURONEXT"
+  EURONEXT = "EURONEXT",
+  TSE = "TSE",
+  SSE = "SSE",
+  HKEX = "HKEX",
+  SGX = "SGX"
 }
 
 export enum Currency {
-  USD = "USD",
-  ILS = "ILS",
-  EUR = "EUR",
-  GBP = "GBP"
+  USD = 'USD',
+  ILS = 'ILS'
 }
 
 export enum SyncMode {
-  LOCAL = "LOCAL",
-  CLOUD = "CLOUD"
+  MANUAL = 'manual',
+  CLOUD = 'cloud'
 }
 
 export enum ThemeMode {

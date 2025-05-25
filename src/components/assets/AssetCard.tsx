@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TrendingUpIcon, TrendingDownIcon, RefreshCwIcon, TrashIcon, EditIcon } from 'lucide-react';
 import { Asset, Currency } from '../../types';
 import { usePortfolio } from '../../context/PortfolioContext';
 import { formatCurrency } from '../../utils/currencyUtils';
-import { formatTime } from '../../utils/dateUtils';
+import { format } from 'date-fns';
 import { calculateAverageCost, calculateProfitLoss, calculateTotalShares } from '../../utils/dataFetching';
 import DeleteConfirmation from '../common/DeleteConfirmation';
 
@@ -16,13 +16,43 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
   const { selectedCurrency, deleteAsset } = usePortfolio();
   const [showDetails, setShowDetails] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [avgCost, setAvgCost] = useState(0);
+  const [profitLoss, setProfitLoss] = useState({ absolute: 0, percentage: 0 });
+  const [isLoading, setIsLoading] = useState(true);
 
   const totalShares = calculateTotalShares(asset);
-  const avgCost = calculateAverageCost(asset, selectedCurrency);
-  const { absolute: profitLoss, percentage: profitLossPercentage } = calculateProfitLoss(asset, selectedCurrency);
-  
-  const isPositive = profitLoss >= 0;
-  const formattedTime = formatTime(asset.lastUpdated);
+  const isPositive = profitLoss.absolute >= 0;
+  const priceChange = asset.currentPrice - asset.previousPrice;
+  const priceChangePercent = asset.previousPrice > 0 
+    ? (priceChange / asset.previousPrice) * 100 
+    : 0;
+
+  // Format date with time
+  const formatDateTime = (date: Date) => {
+    return format(date, 'HH:mm:ss dd/MM/yyyy');
+  };
+
+  // Format date without time
+  const formatDate = (date: Date) => {
+    return format(date, 'dd/MM/yyyy');
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        const avgCost = await calculateAverageCost(asset, selectedCurrency);
+        const pl = await calculateProfitLoss(asset, selectedCurrency);
+        setAvgCost(avgCost);
+        setProfitLoss(pl);
+      } catch (error) {
+        console.error('Failed to calculate metrics:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [asset, selectedCurrency]);
 
   return (
     <>
@@ -56,17 +86,26 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
           <div className="flex justify-between items-center mt-4">
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Current Price</p>
-              <p className="text-xl font-semibold text-gray-900 dark:text-white">
-                {formatCurrency(asset.currentPrice, asset.tradingCurrency)}
-              </p>
+              <div>
+                <p className="text-xl font-semibold text-gray-900 dark:text-white">
+                  {formatCurrency(asset.currentPrice, asset.tradingCurrency, { isCurrentPrice: true })}
+                </p>
+                <p className={`text-sm flex items-center ${priceChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {priceChange >= 0 ? <TrendingUpIcon size={16} className="mr-1" /> : <TrendingDownIcon size={16} className="mr-1" />}
+                  {priceChange >= 0 ? '+' : ''}{formatCurrency(priceChange, asset.tradingCurrency, { isCurrentPrice: true })} ({priceChangePercent.toFixed(2)}%)
+                </p>
+              </div>
             </div>
             <div className="text-right">
               <p className="text-sm text-gray-500 dark:text-gray-400">Total P&L</p>
-              <p className={`text-xl font-semibold ${
-                isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-              }`}>
-                {formatCurrency(profitLoss, selectedCurrency)}
-              </p>
+              <div>
+                <p className={`text-xl font-semibold ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {formatCurrency(profitLoss.absolute, selectedCurrency)}
+                </p>
+                <p className={`text-sm ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {isPositive ? '+' : ''}{profitLoss.percentage.toFixed(2)}%
+                </p>
+              </div>
             </div>
           </div>
           
@@ -104,7 +143,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
                       className="flex justify-between py-2 border-t border-gray-100 dark:border-slate-700 text-sm"
                     >
                       <div className="text-gray-500 dark:text-gray-400">
-                        {new Date(purchase.date).toLocaleDateString()}
+                        {formatDate(purchase.date)}
                       </div>
                       <div className="text-gray-700 dark:text-gray-300">
                         {purchase.quantity} shares @ {formatCurrency(purchase.price, purchase.currency)}
@@ -120,7 +159,7 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
         <div className="px-4 py-3 bg-gray-50 dark:bg-slate-700/50 flex justify-between items-center">
           <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
             <RefreshCwIcon size={12} className="mr-1" />
-            <span>Updated {formattedTime}</span>
+            <span>Updated {formatDateTime(asset.lastUpdated)}</span>
           </div>
           <button 
             onClick={() => setShowDetails(!showDetails)}
