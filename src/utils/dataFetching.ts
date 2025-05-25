@@ -1,12 +1,8 @@
 import { Asset, Currency } from '../types';
 import { convertCurrency } from './currencyUtils';
+import axios from 'axios';
 
 const ALPHA_VANTAGE_API_KEY = import.meta.env.VITE_ALPHA_VANTAGE_API_KEY;
-const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY;
-
-if (!FINNHUB_API_KEY) {
-  console.warn('Finnhub API key is not set. Stock price updates will use mock data.');
-}
 
 if (!ALPHA_VANTAGE_API_KEY) {
   console.warn('Alpha Vantage API key is not set. Stock search will use mock data.');
@@ -26,6 +22,10 @@ interface StockQuote {
   price: number;
   previousClose: number;
   timestamp: number;
+  high?: number;
+  low?: number;
+  open?: number;
+  volume?: number;
 }
 
 interface StockSearchResult {
@@ -85,54 +85,188 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
 };
 
 /**
+ * Format ticker symbol for Yahoo Finance API
+ */
+const formatYahooSymbol = (symbol: string, exchange?: string): string => {
+  if (!exchange) return symbol;
+  
+  // Remove any existing exchange prefixes if present
+  const cleanSymbol = symbol.replace(/^(LSE:|TASE:|LON:|M|TLV:|NASDAQ:)/, '')
+                           // Replace dots with dashes for TASE symbols
+                           .replace(/\./g, '-');
+  
+  switch (exchange) {
+    case 'LSE':
+      return `${cleanSymbol}.L`;
+    case 'TASE':
+      // For TASE securities, use the format: SYMBOL-XXXXX.TA
+      return `${cleanSymbol}.TA`;
+    case 'NASDAQ':
+      // For NASDAQ stocks, no special formatting needed
+      return cleanSymbol;
+    default:
+      return cleanSymbol;
+  }
+};
+
+/**
+ * Format ticker symbol with exchange prefix if needed
+ */
+const formatTickerSymbol = (symbol: string, exchange?: string): string => {
+  if (!exchange) return symbol;
+  
+  switch (exchange) {
+    case 'LSE':
+      return `LON:${symbol}`; // LSE stocks use LON: prefix
+    default:
+      return symbol;
+  }
+};
+
+/**
+ * Fetch stock quote from Yahoo Finance API
+ */
+export const fetchYahooStockQuote = async (symbol: string, exchange?: string): Promise<StockQuote | null> => {
+  try {
+    const formattedSymbol = formatYahooSymbol(symbol, exchange);
+    console.log(`Fetching Yahoo Finance quote for ${formattedSymbol}...`);
+    
+    // Use cors-proxy.io as a CORS proxy
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${formattedSymbol}?interval=1d&range=1d`;
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
+    
+    console.log(`Making Yahoo Finance API request through proxy: ${proxyUrl}`);
+    
+    const response = await axios.get(proxyUrl);
+    console.log('Yahoo Finance API response:', JSON.stringify(response.data, null, 2));
+    
+    if (response.data?.chart?.result?.[0]) {
+      const result = response.data.chart.result[0];
+      const meta = result.meta;
+      const timestamp = meta.regularMarketTime * 1000;
+      
+      // Convert TASE prices from agorot to shekels
+      let price = meta.regularMarketPrice;
+      let previousClose = meta.chartPreviousClose;
+      
+      if (exchange === 'TASE') {
+        console.log(`Converting TASE price for ${symbol} from agorot to shekels`);
+        console.log(`Original price: ${price} agorot`);
+        price = price / 100;
+        previousClose = previousClose / 100;
+        console.log(`Converted price: ${price} shekels`);
+      }
+      
+      const stockQuote = {
+        symbol,
+        price,
+        previousClose,
+        timestamp,
+        high: meta.regularMarketDayHigh && exchange === 'TASE' ? meta.regularMarketDayHigh / 100 : meta.regularMarketDayHigh,
+        low: meta.regularMarketDayLow && exchange === 'TASE' ? meta.regularMarketDayLow / 100 : meta.regularMarketDayLow,
+        open: meta.regularMarketOpen && exchange === 'TASE' ? meta.regularMarketOpen / 100 : (meta.regularMarketOpen || price),
+        volume: meta.regularMarketVolume
+      };
+      
+      console.log('Parsed stock quote:', stockQuote);
+      return stockQuote;
+    }
+    
+    console.log('No data returned from Yahoo Finance');
+    return null;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      console.error('Yahoo Finance API error:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+    } else {
+      console.error('Yahoo Finance API error:', error);
+    }
+    throw new Error('Failed to fetch stock quote');
+  }
+};
+
+/**
  * Fetch real-time stock quote
  */
-export const fetchStockQuote = async (symbol: string): Promise<StockQuote | null> => {
+export const fetchStockQuote = async (symbol: string, exchange?: string): Promise<StockQuote | null> => {
   try {
-    console.log(`Fetching quote for ${symbol}...`);
-    
-    // If no API key, return mock data
-    if (!FINNHUB_API_KEY) {
-      console.log('No Finnhub API key found, using mock data');
-      const mockData = MOCK_STOCK_DATA[symbol as keyof typeof MOCK_STOCK_DATA];
-      if (mockData) {
-        return {
-          symbol,
-          price: mockData.price,
-          previousClose: mockData.previousClose,
-          timestamp: Date.now()
-        };
-      }
-      return null;
-    }
-
-    console.log(`Making API request to Finnhub for ${symbol}`);
-    const response = await fetch(
-      `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`
-    );
-
-    if (!response.ok) {
-      console.error(`Finnhub API error: ${response.status} ${response.statusText}`);
-      throw new Error('Failed to fetch stock quote');
-    }
-
-    const data = await response.json();
-    console.log(`Received data for ${symbol}:`, data);
-    
-    if (data.c === null || data.c === undefined) {
-      console.error(`Invalid price data received for ${symbol}`);
-      return null;
+    // Use Yahoo Finance for LSE, TASE, and NASDAQ stocks
+    if (exchange === 'LSE' || exchange === 'TASE' || exchange === 'NASDAQ' || !exchange) {
+      return await fetchYahooStockQuote(symbol, exchange);
     }
     
-    return {
-      symbol,
-      price: data.c,
-      previousClose: data.pc,
-      timestamp: data.t
-    };
-  } catch (error) {
-    console.error(`Failed to fetch quote for ${symbol}:`, error);
+    // Fall back to mock data for unsupported exchanges
+    console.log('Exchange not supported, using mock data');
+    const mockData = MOCK_STOCK_DATA[symbol as keyof typeof MOCK_STOCK_DATA];
+    if (mockData) {
+      return {
+        symbol,
+        price: mockData.price,
+        previousClose: mockData.previousClose,
+        timestamp: Date.now()
+      };
+    }
     return null;
+  } catch (error) {
+    console.error('Stock quote fetch error:', error);
+    throw new Error('Failed to fetch stock quote');
+  }
+};
+
+/**
+ * Fetch historical stock data from Yahoo Finance
+ */
+export const fetchHistoricalData = async (
+  symbol: string,
+  exchange?: string,
+  from?: string,
+  to?: string
+): Promise<any> => {
+  try {
+    const formattedSymbol = formatYahooSymbol(symbol, exchange);
+    console.log(`Fetching Yahoo Finance historical data for ${formattedSymbol}...`);
+    
+    const range = from ? `range=${from}` : 'range=6mo';
+    const interval = '1d';
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${formattedSymbol}?interval=${interval}&${range}`;
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
+    
+    const response = await axios.get(proxyUrl);
+    console.log('Yahoo Finance historical data response:', JSON.stringify(response.data, null, 2));
+    
+    if (response.data?.chart?.result?.[0]) {
+      const result = response.data.chart.result[0];
+      const timestamps = result.timestamp;
+      const quote = result.indicators.quote[0];
+      const adjClose = result.indicators.adjclose?.[0]?.adjclose || quote.close;
+      
+      return timestamps.map((timestamp: number, index: number) => ({
+        date: new Date(timestamp * 1000),
+        open: quote.open?.[index] || null,
+        high: quote.high?.[index] || null,
+        low: quote.low?.[index] || null,
+        close: quote.close?.[index] || null,
+        adjustedClose: adjClose?.[index] || null,
+        volume: quote.volume?.[index] || 0
+      })).filter((item: any) => item.close !== null);
+    }
+    
+    console.log('No historical data returned from Yahoo Finance');
+    return null;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      console.error('Yahoo Finance API error:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+    } else {
+      console.error('Yahoo Finance API error:', error);
+    }
+    throw new Error('Failed to fetch historical data');
   }
 };
 
@@ -143,7 +277,7 @@ export const fetchLatestPrices = async (assets: Asset[]): Promise<Asset[]> => {
   try {
     const updatedAssets = await Promise.all(
       assets.map(async (asset) => {
-        const quote = await fetchStockQuote(asset.ticker);
+        const quote = await fetchStockQuote(asset.ticker, asset.exchange);
         
         if (quote) {
           return {
