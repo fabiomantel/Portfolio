@@ -12,6 +12,7 @@ interface PortfolioContextType {
   syncMode: SyncMode;
   isLoading: boolean;
   totalValue: number;
+  isAuthenticated: boolean;
   addAsset: (asset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => Promise<void>;
   updateAsset: (id: string, asset: Partial<Asset>) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
@@ -37,11 +38,13 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [syncMode, setSyncMode] = useState<SyncMode>(SyncMode.CLOUD);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [totalValue, setTotalValue] = useState<number>(0);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   // Check authentication status before fetching data
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
       if (session) {
         fetchData();
       }
@@ -51,6 +54,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // Subscribe to auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
       if (session) {
         fetchData();
       } else {
@@ -71,7 +75,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        throw new Error('No authenticated session');
+        return;
       }
 
       // Query assets with their related purchases
@@ -144,20 +148,21 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Auto-refresh prices every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      refreshPrices();
+      if (isAuthenticated) {
+        refreshPrices();
+      }
     }, 60000);
     
     return () => clearInterval(interval);
-  }, [assets]);
+  }, [assets, isAuthenticated]);
 
   const refreshPrices = useCallback(async () => {
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to refresh prices');
+    }
+
     setIsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No authenticated session');
-      }
-
       const updatedAssets = await fetchLatestPrices(assets);
       
       // Update prices in Supabase
@@ -178,15 +183,18 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } finally {
       setIsLoading(false);
     }
-  }, [assets]);
+  }, [assets, isAuthenticated]);
 
   // CRUD operations for assets
   const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to add assets');
+    }
+
     try {
-      // Get the current session
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        throw new Error('Please sign in to add assets');
+        throw new Error('Authentication session expired');
       }
 
       // Insert the asset with the user's ID
@@ -254,12 +262,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateAsset = async (id: string, updatedFields: Partial<Asset>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to update assets');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to update assets');
+    }
 
+    try {
       const { error } = await supabase
         .from('assets')
         .update(updatedFields)
@@ -274,12 +281,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteAsset = async (id: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to delete assets');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to delete assets');
+    }
 
+    try {
       const { error } = await supabase
         .from('assets')
         .delete()
@@ -295,12 +301,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Add purchase operation
   const addPurchase = async (assetId: string, purchase: Omit<Purchase, 'id'>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to add purchases');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to add purchases');
+    }
 
+    try {
       const { data, error } = await supabase
         .from('purchases')
         .insert([{
@@ -340,12 +345,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // CRUD operations for RSUs
   const addRSU = async (rsu: Omit<RSU, 'id'>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to add RSUs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to add RSUs');
+    }
 
+    try {
       const { data, error } = await supabase
         .from('rsus')
         .insert([rsu])
@@ -361,12 +365,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateRSU = async (id: string, updatedFields: Partial<RSU>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to update RSUs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to update RSUs');
+    }
 
+    try {
       const { error } = await supabase
         .from('rsus')
         .update(updatedFields)
@@ -381,12 +384,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteRSU = async (id: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to delete RSUs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to delete RSUs');
+    }
 
+    try {
       const { error } = await supabase
         .from('rsus')
         .delete()
@@ -402,12 +404,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // CRUD operations for ESPPs
   const addESPP = async (espp: Omit<ESPP, 'id'>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to add ESPPs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to add ESPPs');
+    }
 
+    try {
       const { data, error } = await supabase
         .from('espps')
         .insert([espp])
@@ -423,12 +424,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateESPP = async (id: string, updatedFields: Partial<ESPP>) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to update ESPPs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to update ESPPs');
+    }
 
+    try {
       const { error } = await supabase
         .from('espps')
         .update(updatedFields)
@@ -443,12 +443,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteESPP = async (id: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to delete ESPPs');
-      }
+    if (!isAuthenticated) {
+      throw new Error('Please sign in to delete ESPPs');
+    }
 
+    try {
       const { error } = await supabase
         .from('espps')
         .delete()
@@ -470,6 +469,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     syncMode,
     isLoading,
     totalValue,
+    isAuthenticated,
     addAsset,
     updateAsset,
     deleteAsset,
