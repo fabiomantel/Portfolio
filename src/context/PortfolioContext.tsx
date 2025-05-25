@@ -38,14 +38,42 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [totalValue, setTotalValue] = useState<number>(0);
 
-  // Fetch initial data
+  // Check authentication status before fetching data
   useEffect(() => {
-    fetchData();
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        fetchData();
+      }
+    };
+    
+    checkAuth();
+
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        fetchData();
+      } else {
+        // Clear data when user logs out
+        setAssets([]);
+        setRSUs([]);
+        setESPPs([]);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No authenticated session');
+      }
+
       // Query assets with their related purchases
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
@@ -125,6 +153,11 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const refreshPrices = useCallback(async () => {
     setIsLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No authenticated session');
+      }
+
       const updatedAssets = await fetchLatestPrices(assets);
       
       // Update prices in Supabase
@@ -150,16 +183,17 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // CRUD operations for assets
   const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
     try {
-      // Get the current user's ID
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) throw new Error('No authenticated user found');
+      // Get the current session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to add assets');
+      }
 
-      // First, insert the asset with the user's ID
+      // Insert the asset with the user's ID
       const { data: assetData, error: assetError } = await supabase
         .from('assets')
         .insert([{
-          user_id: user.id,
+          user_id: session.user.id,
           name: newAsset.name,
           ticker: newAsset.ticker,
           exchange: newAsset.exchange,
@@ -220,122 +254,212 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateAsset = async (id: string, updatedFields: Partial<Asset>) => {
-    const { error } = await supabase
-      .from('assets')
-      .update(updatedFields)
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to update assets');
+      }
 
-    if (error) throw error;
-    setAssets(prev => prev.map(asset => asset.id === id ? { ...asset, ...updatedFields } : asset));
+      const { error } = await supabase
+        .from('assets')
+        .update(updatedFields)
+        .eq('id', id);
+
+      if (error) throw error;
+      setAssets(prev => prev.map(asset => asset.id === id ? { ...asset, ...updatedFields } : asset));
+    } catch (error) {
+      console.error("Failed to update asset:", error);
+      throw error;
+    }
   };
 
   const deleteAsset = async (id: string) => {
-    const { error } = await supabase
-      .from('assets')
-      .delete()
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to delete assets');
+      }
 
-    if (error) throw error;
-    setAssets(prev => prev.filter(asset => asset.id !== id));
+      const { error } = await supabase
+        .from('assets')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setAssets(prev => prev.filter(asset => asset.id !== id));
+    } catch (error) {
+      console.error("Failed to delete asset:", error);
+      throw error;
+    }
   };
 
   // Add purchase operation
   const addPurchase = async (assetId: string, purchase: Omit<Purchase, 'id'>) => {
-    const { data, error } = await supabase
-      .from('purchases')
-      .insert([{
-        asset_id: assetId,
-        price: purchase.price,
-        quantity: purchase.quantity,
-        date: purchase.date.toISOString().split('T')[0],
-        currency: purchase.currency
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    const newPurchase: Purchase = {
-      id: data.id,
-      price: data.price,
-      quantity: data.quantity,
-      date: new Date(data.date),
-      currency: data.currency
-    };
-
-    setAssets(prev => prev.map(asset => {
-      if (asset.id === assetId) {
-        return {
-          ...asset,
-          purchases: [...asset.purchases, newPurchase]
-        };
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to add purchases');
       }
-      return asset;
-    }));
+
+      const { data, error } = await supabase
+        .from('purchases')
+        .insert([{
+          asset_id: assetId,
+          price: purchase.price,
+          quantity: purchase.quantity,
+          date: purchase.date.toISOString().split('T')[0],
+          currency: purchase.currency
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const newPurchase: Purchase = {
+        id: data.id,
+        price: data.price,
+        quantity: data.quantity,
+        date: new Date(data.date),
+        currency: data.currency
+      };
+
+      setAssets(prev => prev.map(asset => {
+        if (asset.id === assetId) {
+          return {
+            ...asset,
+            purchases: [...asset.purchases, newPurchase]
+          };
+        }
+        return asset;
+      }));
+    } catch (error) {
+      console.error("Failed to add purchase:", error);
+      throw error;
+    }
   };
 
   // CRUD operations for RSUs
   const addRSU = async (rsu: Omit<RSU, 'id'>) => {
-    const { data, error } = await supabase
-      .from('rsus')
-      .insert([rsu])
-      .select()
-      .single();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to add RSUs');
+      }
 
-    if (error) throw error;
-    setRSUs(prev => [...prev, { ...data, vesting_entries: [] }]);
+      const { data, error } = await supabase
+        .from('rsus')
+        .insert([rsu])
+        .select()
+        .single();
+
+      if (error) throw error;
+      setRSUs(prev => [...prev, { ...data, vesting_entries: [] }]);
+    } catch (error) {
+      console.error("Failed to add RSU:", error);
+      throw error;
+    }
   };
 
   const updateRSU = async (id: string, updatedFields: Partial<RSU>) => {
-    const { error } = await supabase
-      .from('rsus')
-      .update(updatedFields)
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to update RSUs');
+      }
 
-    if (error) throw error;
-    setRSUs(prev => prev.map(rsu => rsu.id === id ? { ...rsu, ...updatedFields } : rsu));
+      const { error } = await supabase
+        .from('rsus')
+        .update(updatedFields)
+        .eq('id', id);
+
+      if (error) throw error;
+      setRSUs(prev => prev.map(rsu => rsu.id === id ? { ...rsu, ...updatedFields } : rsu));
+    } catch (error) {
+      console.error("Failed to update RSU:", error);
+      throw error;
+    }
   };
 
   const deleteRSU = async (id: string) => {
-    const { error } = await supabase
-      .from('rsus')
-      .delete()
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to delete RSUs');
+      }
 
-    if (error) throw error;
-    setRSUs(prev => prev.filter(rsu => rsu.id !== id));
+      const { error } = await supabase
+        .from('rsus')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setRSUs(prev => prev.filter(rsu => rsu.id !== id));
+    } catch (error) {
+      console.error("Failed to delete RSU:", error);
+      throw error;
+    }
   };
 
   // CRUD operations for ESPPs
   const addESPP = async (espp: Omit<ESPP, 'id'>) => {
-    const { data, error } = await supabase
-      .from('espps')
-      .insert([espp])
-      .select()
-      .single();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to add ESPPs');
+      }
 
-    if (error) throw error;
-    setESPPs(prev => [...prev, data]);
+      const { data, error } = await supabase
+        .from('espps')
+        .insert([espp])
+        .select()
+        .single();
+
+      if (error) throw error;
+      setESPPs(prev => [...prev, data]);
+    } catch (error) {
+      console.error("Failed to add ESPP:", error);
+      throw error;
+    }
   };
 
   const updateESPP = async (id: string, updatedFields: Partial<ESPP>) => {
-    const { error } = await supabase
-      .from('espps')
-      .update(updatedFields)
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to update ESPPs');
+      }
 
-    if (error) throw error;
-    setESPPs(prev => prev.map(espp => espp.id === id ? { ...espp, ...updatedFields } : espp));
+      const { error } = await supabase
+        .from('espps')
+        .update(updatedFields)
+        .eq('id', id);
+
+      if (error) throw error;
+      setESPPs(prev => prev.map(espp => espp.id === id ? { ...espp, ...updatedFields } : espp));
+    } catch (error) {
+      console.error("Failed to update ESPP:", error);
+      throw error;
+    }
   };
 
   const deleteESPP = async (id: string) => {
-    const { error } = await supabase
-      .from('espps')
-      .delete()
-      .eq('id', id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Please sign in to delete ESPPs');
+      }
 
-    if (error) throw error;
-    setESPPs(prev => prev.filter(espp => espp.id !== id));
+      const { error } = await supabase
+        .from('espps')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setESPPs(prev => prev.filter(espp => espp.id !== id));
+    } catch (error) {
+      console.error("Failed to delete ESPP:", error);
+      throw error;
+    }
   };
 
   const value = {
