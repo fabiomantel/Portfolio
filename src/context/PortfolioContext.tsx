@@ -51,18 +51,39 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         .from('assets')
         .select(`
           *,
-          purchases (*)
+          purchases(*)
         `);
 
       if (assetsError) throw assetsError;
-      setAssets(assetsData || []);
+      
+      // Transform the data to match our Asset type
+      const transformedAssets = assetsData?.map(asset => ({
+        id: asset.id,
+        name: asset.name,
+        ticker: asset.ticker,
+        exchange: asset.exchange,
+        tradingCurrency: asset.trading_currency,
+        broker: asset.broker,
+        currentPrice: asset.current_price,
+        previousPrice: asset.previous_price,
+        lastUpdated: new Date(asset.last_updated),
+        purchases: asset.purchases.map((purchase: any) => ({
+          id: purchase.id,
+          price: purchase.price,
+          quantity: purchase.quantity,
+          date: new Date(purchase.date),
+          currency: purchase.currency
+        }))
+      })) || [];
+
+      setAssets(transformedAssets);
 
       // Query RSUs with their related vesting entries
       const { data: rsusData, error: rsusError } = await supabase
         .from('rsus')
         .select(`
           *,
-          vesting_entries (*)
+          vesting_entries(*)
         `);
 
       if (rsusError) throw rsusError;
@@ -84,8 +105,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Calculate total portfolio value
   useEffect(() => {
     const total = assets.reduce((sum, asset) => {
-      const assetValue = asset.current_price * asset.purchases.reduce((qty, p) => qty + p.quantity, 0);
-      const convertedValue = convertCurrency(assetValue, asset.trading_currency, selectedCurrency);
+      const assetValue = asset.currentPrice * asset.purchases.reduce((qty, p) => qty + p.quantity, 0);
+      const convertedValue = convertCurrency(assetValue, asset.tradingCurrency, selectedCurrency);
       return sum + convertedValue;
     }, 0);
     
@@ -111,8 +132,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         await supabase
           .from('assets')
           .update({
-            current_price: asset.current_price,
-            previous_price: asset.previous_price,
+            current_price: asset.currentPrice,
+            previous_price: asset.previousPrice,
             last_updated: new Date().toISOString()
           })
           .eq('id', asset.id);
@@ -128,20 +149,68 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // CRUD operations for assets
   const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
-    const { data, error } = await supabase
-      .from('assets')
-      .insert([{
-        ...newAsset,
-        current_price: 0,
-        previous_price: 0,
-        last_updated: new Date().toISOString()
-      }])
-      .select()
-      .single();
+    try {
+      // First, insert the asset
+      const { data: assetData, error: assetError } = await supabase
+        .from('assets')
+        .insert([{
+          name: newAsset.name,
+          ticker: newAsset.ticker,
+          exchange: newAsset.exchange,
+          trading_currency: newAsset.tradingCurrency,
+          broker: newAsset.broker,
+          current_price: 0,
+          previous_price: 0,
+          last_updated: new Date().toISOString()
+        }])
+        .select()
+        .single();
 
-    if (error) throw error;
-    setAssets(prev => [...prev, { ...data, purchases: [] }]);
-    await refreshPrices();
+      if (assetError) throw assetError;
+
+      // Then, insert all purchases for this asset
+      const purchasePromises = newAsset.purchases.map(purchase => 
+        supabase
+          .from('purchases')
+          .insert([{
+            asset_id: assetData.id,
+            price: purchase.price,
+            quantity: purchase.quantity,
+            date: purchase.date.toISOString().split('T')[0],
+            currency: purchase.currency
+          }])
+          .select()
+      );
+
+      const purchaseResults = await Promise.all(purchasePromises);
+      const purchases = purchaseResults.map(result => result.data?.[0]).filter(Boolean);
+
+      // Create the complete asset object with purchases
+      const completeAsset: Asset = {
+        id: assetData.id,
+        name: assetData.name,
+        ticker: assetData.ticker,
+        exchange: assetData.exchange,
+        tradingCurrency: assetData.trading_currency,
+        broker: assetData.broker,
+        currentPrice: assetData.current_price,
+        previousPrice: assetData.previous_price,
+        lastUpdated: new Date(assetData.last_updated),
+        purchases: purchases.map(p => ({
+          id: p.id,
+          price: p.price,
+          quantity: p.quantity,
+          date: new Date(p.date),
+          currency: p.currency
+        }))
+      };
+
+      setAssets(prev => [...prev, completeAsset]);
+      await refreshPrices();
+    } catch (error) {
+      console.error("Failed to add asset:", error);
+      throw error;
+    }
   };
 
   const updateAsset = async (id: string, updatedFields: Partial<Asset>) => {
@@ -168,18 +237,31 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const addPurchase = async (assetId: string, purchase: Omit<Purchase, 'id'>) => {
     const { data, error } = await supabase
       .from('purchases')
-      .insert([{ ...purchase, asset_id: assetId }])
+      .insert([{
+        asset_id: assetId,
+        price: purchase.price,
+        quantity: purchase.quantity,
+        date: purchase.date.toISOString().split('T')[0],
+        currency: purchase.currency
+      }])
       .select()
       .single();
 
     if (error) throw error;
 
-    // Update the local assets state to include the new purchase
+    const newPurchase: Purchase = {
+      id: data.id,
+      price: data.price,
+      quantity: data.quantity,
+      date: new Date(data.date),
+      currency: data.currency
+    };
+
     setAssets(prev => prev.map(asset => {
       if (asset.id === assetId) {
         return {
           ...asset,
-          purchases: [...asset.purchases, data]
+          purchases: [...asset.purchases, newPurchase]
         };
       }
       return asset;
