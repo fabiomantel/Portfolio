@@ -4,7 +4,7 @@ import { formatCurrency } from '../../utils/currencyUtils';
 import { ArrowUpIcon, ArrowDownIcon, TrendingUpIcon, TrendingDownIcon } from 'lucide-react';
 import AllocationChart from './AllocationChart';
 import TopMovers from './TopMovers';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 const Dashboard: React.FC = () => {
   const { assets, selectedCurrency, totalValue, isLoading } = usePortfolio();
@@ -25,8 +25,28 @@ const Dashboard: React.FC = () => {
   // Get the most recent update time
   const getLastUpdateTime = () => {
     if (assets.length === 0) return 'No data';
-    const lastUpdate = new Date(Math.max(...assets.map(a => new Date(a.lastUpdated).getTime())));
-    return format(lastUpdate, 'HH:mm');
+    
+    try {
+      // Find the most recent lastUpdated timestamp
+      const lastUpdate = assets.reduce((latest, asset) => {
+        let assetDate;
+        if (typeof asset.lastUpdated === 'string') {
+          assetDate = new Date(asset.lastUpdated);
+        } else if (asset.lastUpdated instanceof Date) {
+          assetDate = asset.lastUpdated;
+        } else {
+          assetDate = new Date();
+        }
+        
+        return assetDate > latest ? assetDate : latest;
+      }, new Date(0));
+      
+      // Format to show only time (HH:mm:ss)
+      return format(lastUpdate, 'HH:mm:ss');
+    } catch (error) {
+      console.error('Error in getLastUpdateTime:', error);
+      return 'Error formatting time';
+    }
   };
 
   return (

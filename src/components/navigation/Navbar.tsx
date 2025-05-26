@@ -8,6 +8,14 @@ const Navbar: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const { selectedCurrency, setCurrency, refreshPrices, isLoading } = usePortfolio();
 
+  const handleRefresh = async () => {
+    try {
+      await refreshPrices();
+    } catch (error) {
+      console.error('Failed to refresh prices:', error);
+    }
+  };
+
   return (
     <nav className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -26,7 +34,7 @@ const Navbar: React.FC = () => {
           <div className="flex items-center space-x-4">
             {/* Refresh button */}
             <button
-              onClick={() => refreshPrices()}
+              onClick={handleRefresh}
               className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 focus:outline-none transition-colors duration-200"
               aria-label="Refresh prices"
               disabled={isLoading}
@@ -63,19 +71,17 @@ const Navbar: React.FC = () => {
             </div>
 
             {/* Theme toggle */}
-            <div className="relative inline-flex items-center">
-              <button
-                onClick={toggleTheme}
-                className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 focus:outline-none transition-colors duration-200"
-                aria-label={theme === ThemeMode.DARK ? "Switch to light theme" : "Switch to dark theme"}
-              >
-                {theme === ThemeMode.DARK ? (
-                  <MoonIcon size={20} />
-                ) : (
-                  <SunIcon size={20} />
-                )}
-              </button>
-            </div>
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 focus:outline-none transition-colors duration-200"
+              aria-label="Toggle theme"
+            >
+              {theme === ThemeMode.LIGHT ? (
+                <MoonIcon size={20} />
+              ) : (
+                <SunIcon size={20} />
+              )}
+            </button>
           </div>
         </div>
       </div>

@@ -109,14 +109,12 @@ export const formatCurrency = (
   options: ExtendedFormatOptions = {}
 ): string => {
   try {
-    // Default to 2 decimal places for current prices, 0 for other values
-    const defaultDecimals = options.isCurrentPrice ? 2 : 0;
-    
+    // Always show 2 decimal places for current prices
     const formatter = new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currency,
-      minimumFractionDigits: defaultDecimals,
-      maximumFractionDigits: defaultDecimals,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
       ...options
     });
 
@@ -124,10 +122,7 @@ export const formatCurrency = (
   } catch (error) {
     console.error('Currency formatting failed:', error);
     // Fallback formatting
-    if (options.isCurrentPrice) {
-      return `${getCurrencySymbol(currency)}${amount.toFixed(2)}`;
-    }
-    return `${getCurrencySymbol(currency)}${Math.round(amount)}`;
+    return `${getCurrencySymbol(currency)}${amount.toFixed(2)}`;
   }
 };
 

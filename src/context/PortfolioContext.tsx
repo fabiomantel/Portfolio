@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Asset, Purchase, RSU, ESPP, Currency, SyncMode, VestingEntry, VestingEntryWithoutId, RsuFormData, EsppFormData } from '../types';
+import { Asset, Purchase, RSU, ESPP, Currency, SyncMode, Exchange, VestingEntry, VestingEntryWithoutId, RsuFormData, EsppFormData, AssetFormData, PurchaseFormData } from '../types';
 import { supabase } from '../lib/supabase';
 import { convertCurrency } from '../utils/currencyUtils';
 import { fetchLatestPrices } from '../utils/dataFetching';
@@ -13,10 +13,10 @@ interface PortfolioContextType {
   isLoading: boolean;
   totalValue: number;
   isAuthenticated: boolean;
-  addAsset: (asset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => Promise<void>;
-  updateAsset: (id: string, asset: Partial<Asset>) => Promise<void>;
+  addAsset: (asset: AssetFormData) => Promise<void>;
+  updateAsset: (id: string, asset: Partial<AssetFormData>) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
-  addPurchase: (assetId: string, purchase: Omit<Purchase, 'id'>) => Promise<void>;
+  addPurchase: (assetId: string, purchase: PurchaseFormData) => Promise<void>;
   addRSU: (rsu: RsuFormData) => Promise<void>;
   updateRSU: (id: string, updatedFields: Partial<Omit<RSU, 'id' | 'vestingSchedule'>> & { vestingSchedule?: VestingEntryWithoutId[] }) => Promise<void>;
   deleteRSU: (id: string) => Promise<void>;
@@ -25,7 +25,7 @@ interface PortfolioContextType {
   deleteESPP: (id: string) => Promise<void>;
   setCurrency: (currency: Currency) => void;
   setSyncMode: (mode: SyncMode) => void;
-  refreshPrices: () => Promise<void>;
+  refreshPrices: () => Promise<Asset[]>;
 }
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
@@ -39,6 +39,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isLoading, setIsLoading] = useState(true);
   const [totalValue, setTotalValue] = useState(0);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
 
   // Check authentication status before fetching data
   useEffect(() => {
@@ -89,44 +90,65 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (assetsError) throw assetsError;
       
       // Transform the data to match our Asset type
-      const transformedAssets = assetsData?.map(asset => ({
-        id: asset.id,
-        name: asset.name,
-        ticker: asset.ticker,
-        exchange: asset.exchange,
-        tradingCurrency: asset.trading_currency,
-        broker: asset.broker,
-        currentPrice: asset.current_price || 0,
-        previousPrice: asset.previous_price || 0,
-        lastUpdated: new Date(asset.last_updated || new Date()),
-        purchases: asset.purchases.map((purchase: any) => ({
-          id: purchase.id,
-          price: purchase.price,
-          quantity: purchase.quantity,
-          date: new Date(purchase.date),
-          currency: purchase.currency
-        }))
-      })) || [];
+      const transformedAssets = assetsData?.map(asset => {
+        // Ensure we have a valid date for lastUpdated
+        let lastUpdated;
+        if (asset.last_updated) {
+          lastUpdated = new Date(asset.last_updated);
+          // If the date is invalid or too old, use current time
+          if (isNaN(lastUpdated.getTime()) || lastUpdated.getFullYear() < 2020) {
+            lastUpdated = new Date();
+          }
+        } else {
+          lastUpdated = new Date();
+        }
 
-      setAssets(transformedAssets);
+        return {
+          id: asset.id,
+          name: asset.name,
+          ticker: asset.ticker,
+          exchange: asset.exchange,
+          tradingCurrency: asset.trading_currency,
+          broker: asset.broker,
+          currentPrice: asset.current_price || 0,
+          previousPrice: asset.previous_price || 0,
+          lastUpdated,
+          purchases: asset.purchases.map((purchase: any) => ({
+            id: purchase.id,
+            price: purchase.price,
+            quantity: purchase.quantity,
+            date: new Date(purchase.date),
+            currency: purchase.currency
+          }))
+        };
+      }) || [];
 
-      // Fetch latest prices immediately after loading assets
+      // If we have assets, immediately fetch latest prices
       if (transformedAssets.length > 0) {
+        const now = new Date();
         const updatedAssets = await fetchLatestPrices(transformedAssets);
         
-        // Update prices in Supabase
-        for (const asset of updatedAssets) {
-          await supabase
+        // Update prices in Supabase and set correct timestamp
+        await Promise.all(updatedAssets.map(asset => 
+          supabase
             .from('assets')
             .update({
               current_price: asset.currentPrice,
               previous_price: asset.previousPrice,
-              last_updated: new Date().toISOString()
+              last_updated: now.toISOString()
             })
-            .eq('id', asset.id);
-        }
+            .eq('id', asset.id)
+        ));
+
+        // Set the correct timestamp for all assets
+        const assetsWithCorrectTime = updatedAssets.map(asset => ({
+          ...asset,
+          lastUpdated: now
+        }));
         
-        setAssets(updatedAssets);
+        setAssets(assetsWithCorrectTime);
+      } else {
+        setAssets(transformedAssets);
       }
 
       // Query RSUs with their related vesting entries
@@ -178,7 +200,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cycleEndDate: new Date(espp.cycle_end_date),
         currentPrice: espp.current_price || 0,
         previousPrice: espp.previous_price || 0,
-        lastUpdated: new Date(espp.last_updated || new Date())
+        lastUpdated: new Date(espp.last_updated || new Date()),
+        exchange: espp.exchange || Exchange.NASDAQ // Default to NASDAQ if not specified
       })) || [];
 
       setESPPs(transformedESPPs);
@@ -209,18 +232,6 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     calculateTotal();
   }, [assets, selectedCurrency]);
 
-  // Auto-refresh prices and exchange rates every 60 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (isAuthenticated) {
-        refreshPrices();
-        calculateTotal();
-      }
-    }, 60000);
-    
-    return () => clearInterval(interval);
-  }, [assets, isAuthenticated, selectedCurrency]);
-
   const refreshPrices = useCallback(async () => {
     if (!isAuthenticated) {
       console.log('Price refresh skipped - user not authenticated');
@@ -230,34 +241,91 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     console.log('Starting price refresh...');
     setIsLoading(true);
     try {
-      console.log('Fetching latest prices for assets:', assets.map(a => a.ticker).join(', '));
-      const updatedAssets = await fetchLatestPrices(assets);
+      // Get current assets from state
+      const currentAssets = assets;
+      console.log('Fetching latest prices for assets:', currentAssets.map(a => a.ticker).join(', '));
+      const updatedAssets = await fetchLatestPrices(currentAssets);
+      
+      // Create a single timestamp for all updates to ensure consistency
+      const now = new Date();
+      const timestamp = now.toISOString();
       
       console.log('Updating prices in Supabase...');
       // Update prices in Supabase
-      for (const asset of updatedAssets) {
-        console.log(`Updating ${asset.ticker}: ${asset.currentPrice} (prev: ${asset.previousPrice})`);
+      const updatedAssetsWithTime = await Promise.all(updatedAssets.map(async (asset) => {
+        // Convert TASE prices from agorot to shekels
+        let currentPrice = asset.currentPrice;
+        let previousPrice = asset.previousPrice;
+        
+        if (asset.exchange === Exchange.TASE) {
+          console.log(`Converting TASE price for ${asset.ticker} from agorot to shekels`);
+          currentPrice = currentPrice / 100;
+          previousPrice = previousPrice / 100;
+        }
+        
         await supabase
           .from('assets')
           .update({
-            current_price: asset.currentPrice,
-            previous_price: asset.previousPrice,
-            last_updated: new Date().toISOString()
+            current_price: currentPrice,
+            previous_price: previousPrice,
+            last_updated: timestamp
           })
           .eq('id', asset.id);
-      }
+          
+        return {
+          ...asset,
+          currentPrice,
+          previousPrice,
+          lastUpdated: now
+        };
+      }));
       
       console.log('Price refresh completed successfully');
-      setAssets(updatedAssets);
+      setAssets(updatedAssetsWithTime);
+      return updatedAssetsWithTime; // Return the updated assets
     } catch (error) {
       console.error("Failed to refresh prices:", error);
+      throw error; // Re-throw the error to be handled by the caller
     } finally {
       setIsLoading(false);
     }
-  }, [assets, isAuthenticated]);
+  }, [isAuthenticated, assets]); // Add assets back as a dependency
+
+  // Handle auto-refresh separately from manual refresh
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isRefreshing = false;
+
+    const autoRefresh = async () => {
+      if (!isAuthenticated || isRefreshing) return;
+      
+      isRefreshing = true;
+      try {
+        await refreshPrices();
+      } catch (error) {
+        console.error('Auto-refresh failed:', error);
+      } finally {
+        isRefreshing = false;
+      }
+    };
+
+    // Set up auto-refresh
+    if (isAuthenticated) {
+      timeoutId = setInterval(autoRefresh, 60000);
+      // Initial refresh
+      autoRefresh();
+    }
+    
+    return () => {
+      if (timeoutId) {
+        clearInterval(timeoutId);
+        timeoutId = null;
+      }
+    };
+  }, [isAuthenticated]);
 
   // CRUD operations for assets
-  const addAsset = async (newAsset: Omit<Asset, 'id' | 'currentPrice' | 'previousPrice' | 'lastUpdated'>) => {
+  const addAsset = async (newAsset: AssetFormData) => {
     if (!isAuthenticated) {
       throw new Error('Please sign in to add assets');
     }
@@ -280,7 +348,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           broker: newAsset.broker,
           current_price: 0,
           previous_price: 0,
-          last_updated: new Date().toISOString()
+          last_updated: new Date().toISOString(),
+          price_override: newAsset.priceOverride
         }])
         .select()
         .single();
@@ -315,6 +384,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         currentPrice: assetData.current_price,
         previousPrice: assetData.previous_price,
         lastUpdated: new Date(assetData.last_updated),
+        priceOverride: assetData.price_override,
         purchases: purchases.map(p => ({
           id: p.id,
           price: p.price,
@@ -324,15 +394,33 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }))
       };
 
+      // Add the new asset to state first
       setAssets(prev => [...prev, completeAsset]);
-      await refreshPrices();
+      
+      // Then fetch latest prices for all assets including the new one
+      const updatedAssets = await fetchLatestPrices([...assets, completeAsset]);
+      
+      // Update prices in Supabase for all assets
+      await Promise.all(updatedAssets.map(asset => 
+        supabase
+          .from('assets')
+          .update({
+            current_price: asset.currentPrice,
+            previous_price: asset.previousPrice,
+            last_updated: new Date().toISOString()
+          })
+          .eq('id', asset.id)
+      ));
+      
+      // Finally update state with all fresh prices
+      setAssets(updatedAssets);
     } catch (error) {
       console.error("Failed to add asset:", error);
       throw error;
     }
   };
 
-  const updateAsset = async (id: string, updatedFields: Partial<Asset>) => {
+  const updateAsset = async (id: string, updatedFields: Partial<AssetFormData>) => {
     if (!isAuthenticated) {
       throw new Error('Please sign in to update assets');
     }
@@ -346,7 +434,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ticker: updatedFields.ticker,
           exchange: updatedFields.exchange,
           trading_currency: updatedFields.tradingCurrency,
-          broker: updatedFields.broker
+          broker: updatedFields.broker,
+          price_override: updatedFields.priceOverride
         })
         .eq('id', id);
 
@@ -390,22 +479,51 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         );
 
         // Update the local state
-        setAssets(prev => prev.map(asset => 
-          asset.id === id 
-            ? {
-                ...asset,
-                ...updatedFields,
-                purchases
-              }
-            : asset
-        ));
+        setAssets(prev => prev.map(asset => {
+          if (asset.id !== id) return asset;
+
+          // Keep existing asset data
+          const updatedAsset = { ...asset };
+
+          // Update basic fields if provided
+          if (updatedFields.name) updatedAsset.name = updatedFields.name;
+          if (updatedFields.ticker) updatedAsset.ticker = updatedFields.ticker;
+          if (updatedFields.exchange) updatedAsset.exchange = updatedFields.exchange;
+          if (updatedFields.tradingCurrency) updatedAsset.tradingCurrency = updatedFields.tradingCurrency;
+          if (updatedFields.broker) updatedAsset.broker = updatedFields.broker;
+          if ('priceOverride' in updatedFields) updatedAsset.priceOverride = updatedFields.priceOverride;
+          
+          // Update purchases if provided, ensuring they have IDs
+          if (purchases && Array.isArray(purchases)) {
+            updatedAsset.purchases = purchases.map(p => ({
+              id: p.id,
+              price: p.price,
+              quantity: p.quantity,
+              date: new Date(p.date),
+              currency: p.currency
+            })) as Purchase[];
+          }
+
+          return updatedAsset;
+        }));
       } else {
         // If no purchases to update, just update the basic information
-        setAssets(prev => prev.map(asset => 
-          asset.id === id 
-            ? { ...asset, ...updatedFields }
-            : asset
-        ));
+        setAssets(prev => prev.map(asset => {
+          if (asset.id !== id) return asset;
+
+          // Keep existing asset data
+          const updatedAsset = { ...asset };
+
+          // Update basic fields if provided
+          if (updatedFields.name) updatedAsset.name = updatedFields.name;
+          if (updatedFields.ticker) updatedAsset.ticker = updatedFields.ticker;
+          if (updatedFields.exchange) updatedAsset.exchange = updatedFields.exchange;
+          if (updatedFields.tradingCurrency) updatedAsset.tradingCurrency = updatedFields.tradingCurrency;
+          if (updatedFields.broker) updatedAsset.broker = updatedFields.broker;
+          if ('priceOverride' in updatedFields) updatedAsset.priceOverride = updatedFields.priceOverride;
+
+          return updatedAsset;
+        }));
       }
     } catch (error) {
       console.error("Failed to update asset:", error);
@@ -433,7 +551,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Add purchase operation
-  const addPurchase = async (assetId: string, purchase: Omit<Purchase, 'id'>) => {
+  const addPurchase = async (assetId: string, purchase: PurchaseFormData) => {
     if (!isAuthenticated) {
       throw new Error('Please sign in to add purchases');
     }
@@ -673,7 +791,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cycleEndDate: new Date(esppResult.cycle_end_date),
         currentPrice: esppResult.current_price || 0,
         previousPrice: esppResult.previous_price || 0,
-        lastUpdated: new Date(esppResult.last_updated || new Date())
+        lastUpdated: new Date(esppResult.last_updated || new Date()),
+        exchange: esppResult.exchange || Exchange.NASDAQ // Default to NASDAQ if not specified
       };
 
       setESPPs(prev => [...prev, newEspp]);

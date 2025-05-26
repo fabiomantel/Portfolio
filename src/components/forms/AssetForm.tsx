@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { XIcon, PlusIcon, SearchIcon } from 'lucide-react';
-import { Asset, Exchange, Currency, Purchase } from '../../types';
+import React, { useState } from 'react';
+import { XIcon, PlusIcon, RefreshCwIcon } from 'lucide-react';
+import { Asset, Exchange, Currency, PurchaseFormData, AssetFormData } from '../../types';
 import { usePortfolio } from '../../context/PortfolioContext';
 import AuthForm from '../auth/AuthForm';
-import { searchStocks, fetchStockQuote } from '../../utils/dataFetching';
+import { fetchStockQuote } from '../../utils/dataFetching';
 import { formatCurrency } from '../../utils/currencyUtils';
 
 interface AssetFormProps {
@@ -15,15 +15,16 @@ interface AssetFormProps {
 const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }) => {
   const { addAsset, updateAsset, isAuthenticated } = usePortfolio();
   const [error, setError] = useState<string | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState<number | null>(asset?.priceOverride || asset?.currentPrice || null);
+  const [isPriceOverridden, setIsPriceOverridden] = useState<boolean>(!!asset?.priceOverride);
   
   const [name, setName] = useState(asset?.name || '');
   const [ticker, setTicker] = useState(asset?.ticker || '');
-  const [exchange, setExchange] = useState<Exchange>(asset?.exchange || Exchange.NYSE);
-  const [tradingCurrency, setTradingCurrency] = useState<Currency>(asset?.tradingCurrency || Currency.USD);
+  const [exchange, setExchange] = useState<Exchange | null>(asset?.exchange || null);
+  const [tradingCurrency, setTradingCurrency] = useState<Currency | null>(asset?.tradingCurrency || null);
   const [broker, setBroker] = useState(asset?.broker || '');
-  const [purchases, setPurchases] = useState<Omit<Purchase, 'id'>[]>(
+  const [purchases, setPurchases] = useState<PurchaseFormData[]>(
     asset?.purchases.map(p => ({
       price: p.price,
       quantity: p.quantity,
@@ -34,55 +35,33 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
         price: 0,
         quantity: 0,
         date: new Date(),
-        currency: Currency.USD
+        currency: null
       }
     ]
   );
 
-  // Debounced ticker search
-  useEffect(() => {
-    if (!ticker || ticker.length < 2 || mode === 'edit') return;
+  const fetchPrice = async () => {
+    if (!ticker || !exchange) {
+      setError('Please enter both ticker symbol and exchange first');
+      return;
+    }
     
-    const searchTimer = setTimeout(async () => {
-      setIsSearching(true);
-      setError(null);
-      
-      try {
-        // Search for stock details
-        const results = await searchStocks(ticker);
-        if (results.length > 0) {
-          const stockInfo = results[0];
-          setName(stockInfo.name);
-          setExchange(mapExchangeToEnum(stockInfo.exchange));
-          setTradingCurrency(stockInfo.currency as Currency);
-          
-          // Fetch current price
-          const quote = await fetchStockQuote(stockInfo.symbol);
-          if (quote) {
-            setCurrentPrice(quote.price);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch stock details:', err);
-        setError('Failed to fetch stock details. Please enter manually.');
-      } finally {
-        setIsSearching(false);
+    setIsFetching(true);
+    setError(null);
+    setIsPriceOverridden(false);
+    
+    try {
+      const quote = await fetchStockQuote(ticker, exchange);
+      if (quote) {
+        setCurrentPrice(quote.price);
+      } else {
+        setError('Could not fetch current price');
       }
-    }, 500);
-
-    return () => clearTimeout(searchTimer);
-  }, [ticker, mode]);
-
-  // Map exchange string to Exchange enum
-  const mapExchangeToEnum = (exchangeStr: string): Exchange => {
-    const exchangeMap: { [key: string]: Exchange } = {
-      'NASDAQ': Exchange.NASDAQ,
-      'NYSE': Exchange.NYSE,
-      'LSE': Exchange.LSE,
-      'TSE': Exchange.TSE,
-      'TASE': Exchange.TASE
-    };
-    return exchangeMap[exchangeStr] || Exchange.NYSE;
+    } catch (err) {
+      setError('Failed to fetch current price');
+    } finally {
+      setIsFetching(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -93,23 +72,29 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
       setError('Please sign in to manage assets');
       return;
     }
+
+    if (!exchange || !tradingCurrency) {
+      setError('Please select both exchange and trading currency');
+      return;
+    }
     
     try {
-      // Create purchases with proper date objects
       const formattedPurchases = purchases.map(purchase => ({
         ...purchase,
         price: Number(purchase.price),
         quantity: Number(purchase.quantity),
-        date: new Date(purchase.date)
+        date: new Date(purchase.date),
+        currency: purchase.currency || tradingCurrency // Default to asset's trading currency if not set
       }));
       
-      const assetData = {
+      const assetData: AssetFormData = {
         name,
         ticker,
         exchange,
         tradingCurrency,
         broker,
-        purchases: formattedPurchases as Purchase[]
+        purchases: formattedPurchases,
+        priceOverride: isPriceOverridden ? currentPrice : null
       };
 
       if (mode === 'edit' && asset) {
@@ -153,34 +138,6 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
             
             <form onSubmit={handleSubmit} className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="relative">
-                  <label htmlFor="ticker" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Ticker Symbol
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      id="ticker"
-                      value={ticker}
-                      onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
-                      placeholder="e.g. AAPL"
-                      required
-                      disabled={mode === 'edit'}
-                    />
-                    {isSearching && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-teal-500 border-t-transparent"></div>
-                      </div>
-                    )}
-                  </div>
-                  {currentPrice && (
-                    <div className="absolute right-0 top-0 mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Current Price: {formatCurrency(currentPrice, tradingCurrency)}
-                    </div>
-                  )}
-                </div>
-                
                 <div>
                   <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Asset Name
@@ -195,35 +152,95 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
                     required
                   />
                 </div>
-                
+
+                <div>
+                  <label htmlFor="ticker" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Ticker Symbol
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="ticker"
+                      value={ticker}
+                      onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
+                      placeholder="e.g. AAPL"
+                      required
+                      disabled={mode === 'edit'}
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label htmlFor="exchange" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Exchange
                   </label>
                   <select
                     id="exchange"
-                    value={exchange}
-                    onChange={(e) => setExchange(e.target.value as Exchange)}
+                    value={exchange || ''}
+                    onChange={(e) => setExchange(e.target.value ? e.target.value as Exchange : null)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
                     required
                   >
+                    <option value="">Select Exchange</option>
                     {Object.values(Exchange).map((ex) => (
                       <option key={ex} value={ex}>{ex}</option>
                     ))}
                   </select>
                 </div>
-                
+
+                <div>
+                  <label htmlFor="currentPrice" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Current Price
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      id="currentPrice"
+                      value={currentPrice || ''}
+                      onChange={(e) => {
+                        setCurrentPrice(Number(e.target.value));
+                        setIsPriceOverridden(true);
+                      }}
+                      step="0.01"
+                      min="0"
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
+                      placeholder="Enter price"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchPrice}
+                      disabled={isFetching || !ticker || !exchange}
+                      className={`p-2 border ${
+                        !ticker || !exchange
+                          ? 'border-gray-300 text-gray-400 dark:border-slate-600 dark:text-slate-500'
+                          : 'border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20'
+                      } rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500`}
+                      title={!ticker || !exchange ? 'Enter ticker and select exchange first' : 'Fetch current price'}
+                    >
+                      <RefreshCwIcon size={20} className={isFetching ? 'animate-spin' : ''} />
+                    </button>
+                  </div>
+                  {isPriceOverridden && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Using manual price override
+                    </p>
+                  )}
+                </div>
+
                 <div>
                   <label htmlFor="tradingCurrency" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Trading Currency
                   </label>
                   <select
                     id="tradingCurrency"
-                    value={tradingCurrency}
-                    onChange={(e) => setTradingCurrency(e.target.value as Currency)}
+                    value={tradingCurrency || ''}
+                    onChange={(e) => setTradingCurrency(e.target.value ? e.target.value as Currency : null)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
                     required
+                    disabled={!ticker || !exchange}
                   >
+                    <option value="">Select Currency</option>
                     {Object.values(Currency).map((curr) => (
                       <option key={curr} value={curr}>{curr}</option>
                     ))}
@@ -255,7 +272,7 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
                       price: currentPrice || 0,
                       quantity: 0,
                       date: new Date(),
-                      currency: tradingCurrency
+                      currency: null
                     }])}
                     className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded text-teal-700 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/20 hover:bg-teal-200 dark:hover:bg-teal-900/30 focus:outline-none"
                   >
@@ -351,18 +368,19 @@ const AssetForm: React.FC<AssetFormProps> = ({ onClose, asset, mode = 'create' }
                           Currency
                         </label>
                         <select
-                          value={purchase.currency}
+                          value={purchase.currency || ''}
                           onChange={(e) => {
                             const updatedPurchases = [...purchases];
                             updatedPurchases[index] = {
                               ...purchase,
-                              currency: e.target.value as Currency
+                              currency: e.target.value ? e.target.value as Currency : null
                             };
                             setPurchases(updatedPurchases);
                           }}
                           className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 dark:bg-slate-700 dark:text-white"
                           required
                         >
+                          <option value="">Select Currency</option>
                           {Object.values(Currency).map((curr) => (
                             <option key={curr} value={curr}>{curr}</option>
                           ))}

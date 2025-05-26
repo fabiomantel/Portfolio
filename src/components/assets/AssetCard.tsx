@@ -3,9 +3,10 @@ import { TrendingUpIcon, TrendingDownIcon, RefreshCwIcon, TrashIcon, EditIcon } 
 import { Asset, Currency } from '../../types';
 import { usePortfolio } from '../../context/PortfolioContext';
 import { formatCurrency } from '../../utils/currencyUtils';
-import { format } from 'date-fns';
+import { format, subMonths } from 'date-fns';
 import { calculateAverageCost, calculateProfitLoss, calculateTotalShares } from '../../utils/dataFetching';
 import DeleteConfirmation from '../common/DeleteConfirmation';
+import HistoricalChart from '../charts/HistoricalChart';
 
 interface AssetCardProps {
   asset: Asset;
@@ -133,8 +134,19 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
                   </p>
                 </div>
               </div>
+
+              {/* Historical Chart */}
+              <div className="mt-6">
+                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Price History (6 Months)</h4>
+                <HistoricalChart
+                  symbol={asset.ticker}
+                  exchange={asset.exchange}
+                  from={format(subMonths(new Date(), 6), 'yyyy-MM-dd')}
+                  to={format(new Date(), 'yyyy-MM-dd')}
+                />
+              </div>
               
-              <div className="mt-4">
+              <div className="mt-6">
                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Purchase History</h4>
                 <div className="max-h-40 overflow-y-auto">
                   {asset.purchases.map(purchase => (

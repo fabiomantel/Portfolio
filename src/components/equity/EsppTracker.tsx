@@ -46,7 +46,7 @@ const EsppTracker: React.FC<EsppTrackerProps> = ({ onAddEspp, onEditEspp }) => {
 
     const updatedEspps = await Promise.all(
       espps.map(async (espp) => {
-        const quote = await fetchStockQuote(espp.ticker);
+        const quote = await fetchStockQuote(espp.ticker, espp.exchange);
         if (quote) {
           return {
             ...espp,

@@ -194,7 +194,7 @@ export const fetchYahooStockQuote = async (symbol: string, exchange?: string): P
 export const fetchStockQuote = async (symbol: string, exchange?: string): Promise<StockQuote | null> => {
   try {
     // Use Yahoo Finance for LSE, TASE, and NASDAQ stocks
-    if (exchange === 'LSE' || exchange === 'TASE' || exchange === 'NASDAQ' || !exchange) {
+    if (exchange === 'LSE' || exchange === 'TASE' || exchange === 'NASDAQ' || exchange === 'NYSE' || !exchange) {
       return await fetchYahooStockQuote(symbol, exchange);
     }
     
