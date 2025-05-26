@@ -58,12 +58,13 @@ export interface ESPP {
   broker: string;
   cycleStartDate: Date;
   cycleEndDate: Date;
-  currentPrice?: number;
-  previousPrice?: number;
-  lastUpdated?: Date;
+  currentPrice: number;
+  previousPrice: number;
+  lastUpdated: Date;
+  exchange: Exchange;
 }
 
-export type EsppFormData = {
+export interface EsppFormData {
   ticker: string;
   company_name: string;
   grant_date: Date;
@@ -74,7 +75,8 @@ export type EsppFormData = {
   broker: string;
   cycle_start_date: Date;
   cycle_end_date: Date;
-};
+  exchange: Exchange;
+}
 
 // Enums
 export enum Exchange {
@@ -82,16 +84,20 @@ export enum Exchange {
   NASDAQ = "NASDAQ",
   TASE = "TASE",
   LSE = "LSE",
-  EURONEXT = "EURONEXT",
-  TSE = "TSE",
-  SSE = "SSE",
-  HKEX = "HKEX",
-  SGX = "SGX"
 }
 
 export enum Currency {
   USD = 'USD',
-  ILS = 'ILS'
+  ILS = 'ILS',
+  EUR = 'EUR',
+  GBP = 'GBP',
+  JPY = 'JPY',
+  CHF = 'CHF',
+  CAD = 'CAD',
+  AUD = 'AUD',
+  CNY = 'CNY',
+  HKD = 'HKD',
+  SGD = 'SGD'
 }
 
 export enum SyncMode {
