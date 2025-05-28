@@ -113,6 +113,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           currentPrice: asset.current_price || 0,
           previousPrice: asset.previous_price || 0,
           lastUpdated,
+          currentPriceOverwritten: asset.current_price_overwritten || false,
           purchases: asset.purchases.map((purchase: any) => ({
             id: purchase.id,
             price: purchase.price,
@@ -346,10 +347,10 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           exchange: newAsset.exchange,
           trading_currency: newAsset.tradingCurrency,
           broker: newAsset.broker,
-          current_price: 0,
+          current_price: newAsset.currentPrice || 0,
           previous_price: 0,
           last_updated: new Date().toISOString(),
-          price_override: newAsset.priceOverride
+          current_price_overwritten: newAsset.currentPriceOverwritten || false
         }])
         .select()
         .single();
@@ -384,7 +385,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         currentPrice: assetData.current_price,
         previousPrice: assetData.previous_price,
         lastUpdated: new Date(assetData.last_updated),
-        priceOverride: assetData.price_override,
+        currentPriceOverwritten: assetData.current_price_overwritten,
         purchases: purchases.map(p => ({
           id: p.id,
           price: p.price,
@@ -435,7 +436,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           exchange: updatedFields.exchange,
           trading_currency: updatedFields.tradingCurrency,
           broker: updatedFields.broker,
-          price_override: updatedFields.priceOverride
+          current_price: updatedFields.currentPrice,
+          current_price_overwritten: updatedFields.currentPriceOverwritten
         })
         .eq('id', id);
 
@@ -491,7 +493,10 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           if (updatedFields.exchange) updatedAsset.exchange = updatedFields.exchange;
           if (updatedFields.tradingCurrency) updatedAsset.tradingCurrency = updatedFields.tradingCurrency;
           if (updatedFields.broker) updatedAsset.broker = updatedFields.broker;
-          if ('priceOverride' in updatedFields) updatedAsset.priceOverride = updatedFields.priceOverride;
+          if (updatedFields.currentPrice !== undefined) {
+            updatedAsset.currentPrice = updatedFields.currentPrice;
+            updatedAsset.currentPriceOverwritten = updatedFields.currentPriceOverwritten || false;
+          }
           
           // Update purchases if provided, ensuring they have IDs
           if (purchases && Array.isArray(purchases)) {
@@ -520,7 +525,10 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           if (updatedFields.exchange) updatedAsset.exchange = updatedFields.exchange;
           if (updatedFields.tradingCurrency) updatedAsset.tradingCurrency = updatedFields.tradingCurrency;
           if (updatedFields.broker) updatedAsset.broker = updatedFields.broker;
-          if ('priceOverride' in updatedFields) updatedAsset.priceOverride = updatedFields.priceOverride;
+          if (updatedFields.currentPrice !== undefined) {
+            updatedAsset.currentPrice = updatedFields.currentPrice;
+            updatedAsset.currentPriceOverwritten = updatedFields.currentPriceOverwritten || false;
+          }
 
           return updatedAsset;
         }));

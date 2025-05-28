@@ -21,6 +21,7 @@ export interface Database {
           current_price: number
           previous_price: number
           last_updated: string
+          current_price_overwritten: boolean
           created_at: string
         }
         Insert: {
@@ -34,6 +35,7 @@ export interface Database {
           current_price?: number
           previous_price?: number
           last_updated?: string
+          current_price_overwritten?: boolean
           created_at?: string
         }
         Update: {
@@ -47,6 +49,7 @@ export interface Database {
           current_price?: number
           previous_price?: number
           last_updated?: string
+          current_price_overwritten?: boolean
           created_at?: string
         }
       }

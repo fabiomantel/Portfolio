@@ -13,6 +13,7 @@
       - `current_price` (numeric)
       - `previous_price` (numeric)
       - `last_updated` (timestamptz)
+      - `current_price_overwritten` (boolean)
       - `created_at` (timestamptz)
 
     - `purchases`
@@ -73,6 +74,7 @@ CREATE TABLE assets (
   current_price numeric DEFAULT 0,
   previous_price numeric DEFAULT 0,
   last_updated timestamptz DEFAULT now(),
+  current_price_overwritten boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   CONSTRAINT valid_exchange CHECK (exchange IN ('NYSE', 'NASDAQ', 'TASE', 'LSE', 'EURONEXT')),
   CONSTRAINT valid_currency CHECK (trading_currency IN ('USD', 'ILS', 'EUR', 'GBP'))

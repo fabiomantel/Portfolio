@@ -10,6 +10,7 @@ export interface Asset {
   currentPrice: number;
   previousPrice: number;
   lastUpdated: Date;
+  currentPriceOverwritten: boolean;
 }
 
 export interface Purchase {
@@ -18,6 +19,24 @@ export interface Purchase {
   quantity: number;
   date: Date;
   currency: Currency;
+}
+
+export interface PurchaseFormData {
+  price: number;
+  quantity: number;
+  date: Date;
+  currency: Currency;
+}
+
+export interface AssetFormData {
+  name: string;
+  ticker: string;
+  exchange: Exchange;
+  tradingCurrency: Currency;
+  broker: string;
+  purchases: PurchaseFormData[];
+  currentPrice?: number;
+  currentPriceOverwritten?: boolean;
 }
 
 // RSU Types

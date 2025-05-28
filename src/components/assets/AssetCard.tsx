@@ -28,6 +28,17 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
     ? (priceChange / asset.previousPrice) * 100 
     : 0;
 
+  // Calculate total quantity and market value
+  const totalQuantity = asset.purchases.reduce((sum, p) => sum + p.quantity, 0);
+  const marketValue = totalQuantity * asset.currentPrice;
+
+  // Calculate total cost basis
+  const costBasis = asset.purchases.reduce((sum, p) => sum + (p.price * p.quantity), 0);
+  
+  // Calculate gain/loss
+  const gainLoss = marketValue - costBasis;
+  const gainLossPercentage = (gainLoss / costBasis) * 100;
+
   // Format date with time
   const formatDateTime = (date: Date) => {
     return format(date, 'HH:mm:ss dd/MM/yyyy');
@@ -84,28 +95,32 @@ const AssetCard: React.FC<AssetCardProps> = ({ asset, onEdit }) => {
             </div>
           </div>
           
-          <div className="flex justify-between items-center mt-4">
+          <div className="grid grid-cols-2 gap-4 mt-4">
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Current Price</p>
-              <div>
-                <p className="text-xl font-semibold text-gray-900 dark:text-white">
-                  {formatCurrency(asset.currentPrice, asset.tradingCurrency, { isCurrentPrice: true })}
-                </p>
-                <p className={`text-sm flex items-center ${priceChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {priceChange >= 0 ? <TrendingUpIcon size={16} className="mr-1" /> : <TrendingDownIcon size={16} className="mr-1" />}
-                  {priceChange >= 0 ? '+' : ''}{formatCurrency(priceChange, asset.tradingCurrency, { isCurrentPrice: true })} ({priceChangePercent.toFixed(2)}%)
-                </p>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Market Value</div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(marketValue, asset.tradingCurrency)}
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Total P&L</p>
-              <div>
-                <p className={`text-xl font-semibold ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {formatCurrency(profitLoss.absolute, selectedCurrency)}
-                </p>
-                <p className={`text-sm ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {isPositive ? '+' : ''}{profitLoss.percentage.toFixed(2)}%
-                </p>
+            <div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Current Price</div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                {formatCurrency(asset.currentPrice, asset.tradingCurrency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Quantity</div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                {totalQuantity.toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Gain/Loss</div>
+              <div className={`text-lg font-semibold ${gainLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                {formatCurrency(gainLoss, asset.tradingCurrency)}
+                <span className="text-sm ml-1">
+                  ({gainLossPercentage >= 0 ? '+' : ''}{gainLossPercentage.toFixed(2)}%)
+                </span>
               </div>
             </div>
           </div>
